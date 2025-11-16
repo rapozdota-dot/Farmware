@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Record;
+use App\Services\DecisionTree;
+use App\Services\FeatureEstimator;
 use App\Services\LinearRegression;
+use App\Services\NeuralNetwork;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -167,21 +170,54 @@ class RecordController extends Controller
 
 		$featuresTrain = array_map(fn($x) => [ $x['rainfall_mm'],$x['temperature_c'],$x['soil_ph'],$x['fertilizer_kg'],$x['area_ha'] ], $train);
 		$targetsTrain = array_map(fn($x) => $x['yield_t_ha'], $train);
-		$model = new LinearRegression();
-		$model->fit($featuresTrain, $targetsTrain, 1e-4);
 
-		$errors = [];
+		// Evaluate Linear Regression (Simplest)
+		$lrModel = new LinearRegression();
+		$lrModel->fit($featuresTrain, $targetsTrain, 1e-4);
+		$lrErrors = [];
 		foreach ($test as $row) {
-			$pred = $model->predict([ $row['rainfall_mm'],$row['temperature_c'],$row['soil_ph'],$row['fertilizer_kg'],$row['area_ha'] ]);
-			$errors[] = $pred - $row['yield_t_ha'];
+			$pred = $lrModel->predict([ $row['rainfall_mm'],$row['temperature_c'],$row['soil_ph'],$row['fertilizer_kg'],$row['area_ha'] ]);
+			$lrErrors[] = $pred - $row['yield_t_ha'];
 		}
-		$mae = count($errors) ? array_sum(array_map('abs', $errors)) / count($errors) : null;
-		$rmse = count($errors) ? sqrt(array_sum(array_map(fn($e) => $e*$e, $errors)) / count($errors)) : null;
+		$lrMae = count($lrErrors) ? array_sum(array_map('abs', $lrErrors)) / count($lrErrors) : null;
+		$lrRmse = count($lrErrors) ? sqrt(array_sum(array_map(fn($e) => $e*$e, $lrErrors)) / count($lrErrors)) : null;
+
+		// Evaluate Decision Tree (Medium Complexity)
+		$dtModel = new DecisionTree(5, 5);
+		$dtModel->fit($featuresTrain, $targetsTrain);
+		$dtErrors = [];
+		foreach ($test as $row) {
+			$pred = $dtModel->predict([ $row['rainfall_mm'],$row['temperature_c'],$row['soil_ph'],$row['fertilizer_kg'],$row['area_ha'] ]);
+			$dtErrors[] = $pred - $row['yield_t_ha'];
+		}
+		$dtMae = count($dtErrors) ? array_sum(array_map('abs', $dtErrors)) / count($dtErrors) : null;
+		$dtRmse = count($dtErrors) ? sqrt(array_sum(array_map(fn($e) => $e*$e, $dtErrors)) / count($dtErrors)) : null;
+
+		// Evaluate Neural Network (Most Advanced)
+		$nnModel = new NeuralNetwork(5, [10, 8], 0.01, 500);
+		$nnModel->fit($featuresTrain, $targetsTrain);
+		$nnErrors = [];
+		foreach ($test as $row) {
+			$pred = $nnModel->predict([ $row['rainfall_mm'],$row['temperature_c'],$row['soil_ph'],$row['fertilizer_kg'],$row['area_ha'] ]);
+			$nnErrors[] = $pred - $row['yield_t_ha'];
+		}
+		$nnMae = count($nnErrors) ? array_sum(array_map('abs', $nnErrors)) / count($nnErrors) : null;
+		$nnRmse = count($nnErrors) ? sqrt(array_sum(array_map(fn($e) => $e*$e, $nnErrors)) / count($nnErrors)) : null;
 
 		return view('records.evaluate', [
-			'mae' => $mae,
-			'rmse' => $rmse,
-			'testSize' => count($errors),
+			'linearRegression' => [
+				'mae' => $lrMae,
+				'rmse' => $lrRmse,
+			],
+			'decisionTree' => [
+				'mae' => $dtMae,
+				'rmse' => $dtRmse,
+			],
+			'neuralNetwork' => [
+				'mae' => $nnMae,
+				'rmse' => $nnRmse,
+			],
+			'testSize' => count($test),
 		]);
 	}
 
@@ -193,20 +229,64 @@ class RecordController extends Controller
 
 	public function forecastForm(): View
 	{
-		return view('records.forecast');
+		$estimator = new FeatureEstimator();
+		$availableLocations = $estimator->getAvailableLocations();
+		$weatherService = new \App\Services\WeatherService();
+		$weatherApiAvailable = $weatherService->isConfigured();
+		
+		return view('records.forecast', [
+			'availableLocations' => $availableLocations,
+			'weatherApiAvailable' => $weatherApiAvailable,
+		]);
 	}
 
 	public function forecast(Request $request): View
 	{
+		$estimator = new FeatureEstimator();
+		$availableLocations = $estimator->getAvailableLocations();
+		
 		$payload = $request->validate([
-			'rainfall_mm' => ['nullable','numeric'],
-			'temperature_c' => ['nullable','numeric'],
-			'soil_ph' => ['nullable','numeric'],
-			'fertilizer_kg' => ['nullable','numeric'],
-			'area_ha' => ['nullable','numeric'],
+			'location' => ['required','string','max:255'],
+			'date' => ['required','date'], // Planting date
+			'harvest_date' => ['nullable','date','after:date'],
+			'use_weather_api' => ['nullable','boolean'],
+			'model_type' => ['nullable','string','in:linear,decision_tree,neural,all'],
 		]);
 
+		$modelType = $payload['model_type'] ?? 'all';
+
 		$records = Record::whereNotNull('yield_t_ha')->get();
+		if ($records->count() < 3) {
+			return view('records.forecast', [
+				'error' => 'Need at least 3 records with yield to make predictions.',
+				'input' => $payload,
+				'availableLocations' => $availableLocations,
+			]);
+		}
+
+		// Estimate features from location and date (with optional weather API)
+		$useWeatherApi = $payload['use_weather_api'] ?? true;
+		$estimatedFeatures = $estimator->estimateFromLocationAndDate(
+			$payload['location'],
+			$payload['date'],
+			$payload['harvest_date'] ?? null,
+			$useWeatherApi
+		);
+		
+		// Determine season for display
+		try {
+			$carbon = \Carbon\Carbon::parse($payload['date']);
+			$month = $carbon->month;
+			$estimatedFeatures['season'] = ($month >= 6 && $month <= 10) ? 'Wet' : 'Dry';
+		} catch (\Exception $e) {
+			$estimatedFeatures['season'] = 'Unknown';
+		}
+		
+		// Check if weather API is available
+		$weatherService = new \App\Services\WeatherService();
+		$weatherApiAvailable = $weatherService->isConfigured();
+
+		// Prepare training data
 		$features = [];
 		$targets = [];
 		foreach ($records as $r) {
@@ -220,21 +300,42 @@ class RecordController extends Controller
 			$targets[] = (float)$r->yield_t_ha;
 		}
 
-		$model = new LinearRegression();
-		$model->fit($features, $targets, 1e-4);
-
+		// Use estimated features for prediction
 		$inputFeature = [
-			(float)($payload['rainfall_mm'] ?? 0),
-			(float)($payload['temperature_c'] ?? 0),
-			(float)($payload['soil_ph'] ?? 0),
-			(float)($payload['fertilizer_kg'] ?? 0),
-			(float)($payload['area_ha'] ?? 0),
+			(float)$estimatedFeatures['rainfall_mm'],
+			(float)$estimatedFeatures['temperature_c'],
+			(float)$estimatedFeatures['soil_ph'],
+			(float)$estimatedFeatures['fertilizer_kg'],
+			(float)$estimatedFeatures['area_ha'],
 		];
-		$prediction = $model->predict($inputFeature);
+
+		$predictions = [];
+
+		if ($modelType === 'linear' || $modelType === 'all') {
+			$lrModel = new LinearRegression();
+			$lrModel->fit($features, $targets, 1e-4);
+			$predictions['linear'] = $lrModel->predict($inputFeature);
+		}
+
+		if ($modelType === 'decision_tree' || $modelType === 'all') {
+			$dtModel = new DecisionTree(5, 5);
+			$dtModel->fit($features, $targets);
+			$predictions['decision_tree'] = $dtModel->predict($inputFeature);
+		}
+
+		if ($modelType === 'neural' || $modelType === 'all') {
+			$nnModel = new NeuralNetwork(5, [10, 8], 0.01, 500);
+			$nnModel->fit($features, $targets);
+			$predictions['neural'] = $nnModel->predict($inputFeature);
+		}
 
 		return view('records.forecast', [
-			'prediction' => $prediction,
+			'predictions' => $predictions,
+			'modelType' => $modelType,
 			'input' => $payload,
+			'estimatedFeatures' => $estimatedFeatures,
+			'availableLocations' => $availableLocations,
+			'weatherApiAvailable' => $weatherApiAvailable,
 		]);
 	}
 
