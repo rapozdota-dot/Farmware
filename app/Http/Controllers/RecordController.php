@@ -7,13 +7,19 @@ use App\Services\DecisionTree;
 use App\Services\FeatureEstimator;
 use App\Services\LinearRegression;
 use App\Services\NeuralNetwork;
+use App\Services\WeatherService;
+use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RecordController extends Controller
 {
+	private const FOCUS_LOCATION = 'Palo, Leyte';
+
 	public function index(): View
 	{
 		try {
@@ -119,7 +125,7 @@ class RecordController extends Controller
 		return redirect()->route('records.index')->with('status', "Imported $count rows");
 	}
 
-	public function export(): Response
+	public function export(): StreamedResponse
 	{
 		$records = Record::orderBy('id')->get();
 		$headers = [
@@ -229,13 +235,11 @@ class RecordController extends Controller
 
 	public function forecastForm(): View
 	{
-		$estimator = new FeatureEstimator();
-		$availableLocations = $estimator->getAvailableLocations();
-		$weatherService = new \App\Services\WeatherService();
+		$weatherService = new WeatherService();
 		$weatherApiAvailable = $weatherService->isConfigured();
 		
 		return view('records.forecast', [
-			'availableLocations' => $availableLocations,
+			'focusLocation' => self::FOCUS_LOCATION,
 			'weatherApiAvailable' => $weatherApiAvailable,
 		]);
 	}
@@ -243,15 +247,53 @@ class RecordController extends Controller
 	public function forecast(Request $request): View
 	{
 		$estimator = new FeatureEstimator();
-		$availableLocations = $estimator->getAvailableLocations();
+		$weatherService = new WeatherService();
+		$weatherApiAvailable = $weatherService->isConfigured();
 		
-		$payload = $request->validate([
-			'location' => ['required','string','max:255'],
-			'date' => ['required','date'], // Planting date
-			'harvest_date' => ['nullable','date','after:date'],
+		$validator = Validator::make($request->all(), [
+			'planting_date' => ['required','date'],
+			'harvest_date' => ['nullable','date'],
 			'use_weather_api' => ['nullable','boolean'],
 			'model_type' => ['nullable','string','in:linear,decision_tree,neural,all'],
 		]);
+
+		$validator->after(function ($validator) {
+			$data = $validator->getData();
+			try {
+				$planting = Carbon::parse($data['planting_date']);
+			} catch (\Exception $e) {
+				$validator->errors()->add('planting_date', 'Planting date is invalid.');
+				return;
+			}
+
+			$earliest = Carbon::create(2015, 1, 1);
+			$latest = Carbon::now()->addYear();
+
+			if ($planting->lt($earliest) || $planting->gt($latest)) {
+				$validator->errors()->add('planting_date', 'Planting date should be between January 1, 2015 and ' . $latest->format('F d, Y') . '.');
+			}
+
+			if (!empty($data['harvest_date'])) {
+				try {
+					$harvest = Carbon::parse($data['harvest_date']);
+				} catch (\Exception $e) {
+					$validator->errors()->add('harvest_date', 'Harvest date is invalid.');
+					return;
+				}
+
+				if ($harvest->lte($planting)) {
+					$validator->errors()->add('harvest_date', 'Harvest date must be after the planting date.');
+					return;
+				}
+
+				$growingDays = $planting->diffInDays($harvest);
+				if ($growingDays < 60 || $growingDays > 210) {
+					$validator->errors()->add('harvest_date', 'Harvest date should be within 60 to 210 days after planting for rice in Palo, Leyte.');
+				}
+			}
+		});
+
+		$payload = $validator->validate();
 
 		$modelType = $payload['model_type'] ?? 'all';
 
@@ -260,32 +302,30 @@ class RecordController extends Controller
 			return view('records.forecast', [
 				'error' => 'Need at least 3 records with yield to make predictions.',
 				'input' => $payload,
-				'availableLocations' => $availableLocations,
+				'focusLocation' => self::FOCUS_LOCATION,
+				'weatherApiAvailable' => $weatherApiAvailable,
 			]);
 		}
 
 		// Estimate features from location and date (with optional weather API)
-		$useWeatherApi = $payload['use_weather_api'] ?? true;
+		$useWeatherApi = array_key_exists('use_weather_api', $payload)
+			? (bool)$payload['use_weather_api']
+			: true;
 		$estimatedFeatures = $estimator->estimateFromLocationAndDate(
-			$payload['location'],
-			$payload['date'],
+			$payload['planting_date'],
 			$payload['harvest_date'] ?? null,
 			$useWeatherApi
 		);
 		
 		// Determine season for display
 		try {
-			$carbon = \Carbon\Carbon::parse($payload['date']);
+			$carbon = Carbon::parse($payload['planting_date']);
 			$month = $carbon->month;
 			$estimatedFeatures['season'] = ($month >= 6 && $month <= 10) ? 'Wet' : 'Dry';
 		} catch (\Exception $e) {
 			$estimatedFeatures['season'] = 'Unknown';
 		}
 		
-		// Check if weather API is available
-		$weatherService = new \App\Services\WeatherService();
-		$weatherApiAvailable = $weatherService->isConfigured();
-
 		// Prepare training data
 		$features = [];
 		$targets = [];
@@ -329,12 +369,15 @@ class RecordController extends Controller
 			$predictions['neural'] = $nnModel->predict($inputFeature);
 		}
 
+		$yieldJustification = $this->buildYieldJustification($estimatedFeatures, $predictions);
+
 		return view('records.forecast', [
 			'predictions' => $predictions,
 			'modelType' => $modelType,
 			'input' => $payload,
 			'estimatedFeatures' => $estimatedFeatures,
-			'availableLocations' => $availableLocations,
+			'yieldJustification' => $yieldJustification,
+			'focusLocation' => self::FOCUS_LOCATION,
 			'weatherApiAvailable' => $weatherApiAvailable,
 		]);
 	}
@@ -351,6 +394,35 @@ class RecordController extends Controller
 			'fertilizer_kg' => ['nullable','numeric'],
 			'yield_t_ha' => ['nullable','numeric'],
 		]);
+	}
+
+	private function buildYieldJustification(array $features, array $predictions): string
+	{
+		$season = $features['season'] ?? 'local';
+		$rainfall = isset($features['rainfall_mm']) ? number_format((float)$features['rainfall_mm'], 1) : '0.0';
+		$temperature = isset($features['temperature_c']) ? number_format((float)$features['temperature_c'], 1) : '0.0';
+		$growingDays = $features['growingDays'] ?? 120;
+
+		try {
+			$plantingRange = Carbon::parse($features['plantingDate'])->format('M d, Y');
+			$harvestRange = Carbon::parse($features['harvestDate'])->format('M d, Y');
+			$dateRange = "{$plantingRange} to {$harvestRange}";
+		} catch (\Exception $e) {
+			$dateRange = 'the current growing window';
+		}
+
+		$referencePrediction = null;
+		if (isset($predictions['neural'])) {
+			$referencePrediction = $predictions['neural'];
+		} elseif (!empty($predictions)) {
+			$referencePrediction = reset($predictions);
+		}
+
+		$predictionFragment = $referencePrediction !== null
+			? 'The AI expects roughly '.number_format((float)$referencePrediction, 2).' t/ha under these conditions.'
+			: 'These conditions align with the historical samples used by the AI.';
+
+		return "Using historical ".strtolower($season)." season patterns for Palo, Leyte ({$dateRange}), the model factors in about {$rainfall} mm of rainfall, {$temperature} °C average temperature, and a {$growingDays}-day growth cycle. {$predictionFragment}";
 	}
 }
 

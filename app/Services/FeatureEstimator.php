@@ -13,6 +13,12 @@ use Carbon\Carbon;
  */
 class FeatureEstimator
 {
+	private const FOCUS_LOCATION = 'Palo';
+	private const FOCUS_LOCATION_DISPLAY = 'Palo, Leyte';
+	private const FOCUS_REGION = 'Eastern Visayas';
+	private const FOCUS_PROVINCE = 'Leyte';
+	private const FOCUS_CLIMATE_ZONE = 'Type II';
+
 	private PhilippineGeography $geography;
 
 	public function __construct()
@@ -21,16 +27,15 @@ class FeatureEstimator
 	}
 
 	/**
-	 * Estimate features based on location and date
+	 * Estimate features for Palo, Leyte based on planting and harvest dates
 	 * Uses intelligent geographic knowledge and optionally weather API for better predictions
-	 * 
-	 * @param string $location
+	 *
 	 * @param string $plantingDate Date string (Y-m-d format)
 	 * @param string|null $harvestDate Optional harvest date (if not provided, calculated as planting + 120 days)
 	 * @param bool $useWeatherApi Whether to try using weather API for real-time data
 	 * @return array Estimated features with metadata
 	 */
-	public function estimateFromLocationAndDate(string $location, string $plantingDate, ?string $harvestDate = null, bool $useWeatherApi = true): array
+	public function estimateFromLocationAndDate(string $plantingDate, ?string $harvestDate = null, bool $useWeatherApi = true): array
 	{
 		$planting = Carbon::parse($plantingDate);
 		$harvest = $harvestDate ? Carbon::parse($harvestDate) : $planting->copy()->addDays(120);
@@ -38,20 +43,25 @@ class FeatureEstimator
 		// Determine season from planting date
 		$season = $this->determineSeason($plantingDate);
 		
-		// Get geographic context
-		$geoContext = $this->geography->getGeographicContext($location);
+		// Fixed geographic context for Palo, Leyte
+		$geoContext = [
+			'province' => self::FOCUS_PROVINCE,
+			'region' => self::FOCUS_REGION,
+			'climateZone' => self::FOCUS_CLIMATE_ZONE,
+			'isMunicipality' => true,
+		];
 		
 		// Try to get weather API data first (if enabled and available)
 		$weatherData = null;
 		if ($useWeatherApi) {
 			$weatherService = new WeatherService();
 			if ($weatherService->isConfigured()) {
-				$weatherData = $weatherService->getGrowingSeasonWeather($location, $planting, $harvest);
+				$weatherData = $weatherService->getGrowingSeasonWeather(self::FOCUS_LOCATION_DISPLAY, $planting, $harvest);
 			}
 		}
 		
 		// Priority 1: Try location-specific averages
-		$locationAverages = $this->getLocationSeasonAverages($location, $season);
+		$locationAverages = $this->getLocationSeasonAverages(self::FOCUS_LOCATION, $season);
 		if ($locationAverages) {
 			$result = array_merge($locationAverages, [
 				'hasLocationData' => true,
@@ -60,10 +70,11 @@ class FeatureEstimator
 				'region' => $geoContext['region'],
 				'climateZone' => $geoContext['climateZone'],
 				'isMunicipality' => $geoContext['isMunicipality'] ?? false,
+				'locationLabel' => self::FOCUS_LOCATION_DISPLAY,
 				'plantingDate' => $plantingDate,
 				'harvestDate' => $harvest->format('Y-m-d'),
 				'growingDays' => $planting->diffInDays($harvest),
-				'dataSource' => "Location-specific averages for {$location} ({$season} season)",
+				'dataSource' => "Location-specific averages for ".self::FOCUS_LOCATION_DISPLAY." ({$season} season)",
 			]);
 			
 			// Enhance with weather API data if available
@@ -88,6 +99,7 @@ class FeatureEstimator
 					'region' => $geoContext['region'],
 					'climateZone' => $geoContext['climateZone'],
 					'isMunicipality' => $geoContext['isMunicipality'] ?? false,
+					'locationLabel' => self::FOCUS_LOCATION_DISPLAY,
 					'plantingDate' => $plantingDate,
 					'harvestDate' => $harvest->format('Y-m-d'),
 					'growingDays' => $planting->diffInDays($harvest),
@@ -116,6 +128,7 @@ class FeatureEstimator
 			'region' => $geoContext['region'],
 			'climateZone' => $geoContext['climateZone'],
 			'isMunicipality' => $geoContext['isMunicipality'] ?? false,
+			'locationLabel' => self::FOCUS_LOCATION_DISPLAY,
 			'plantingDate' => $plantingDate,
 			'harvestDate' => $harvest->format('Y-m-d'),
 			'growingDays' => $planting->diffInDays($harvest),
@@ -163,14 +176,18 @@ class FeatureEstimator
 	 */
 	private function getLocationSeasonAverages(string $location, string $season): ?array
 	{
-		// Try exact match first
-		$records = Record::whereRaw('LOWER(location) = LOWER(?)', [$location])
-			->where('season', $season)
+		$locationLower = strtolower($location);
+
+		$records = Record::where('season', $season)
 			->whereNotNull('rainfall_mm')
 			->whereNotNull('temperature_c')
 			->whereNotNull('soil_ph')
 			->whereNotNull('fertilizer_kg')
 			->whereNotNull('area_ha')
+			->where(function ($query) use ($location, $locationLower) {
+				$query->whereRaw('LOWER(location) = LOWER(?)', [$location])
+					->orWhereRaw('LOWER(location) LIKE ?', ["%{$locationLower}%"]);
+			})
 			->get();
 
 		if ($records->isEmpty()) {
@@ -264,27 +281,5 @@ class FeatureEstimator
 		];
 	}
 
-	/**
-	 * Get available locations from database
-	 */
-	public function getAvailableLocations(): array
-	{
-		return Record::whereNotNull('location')
-			->distinct()
-			->pluck('location')
-			->filter()
-			->sort()
-			->values()
-			->toArray();
-	}
-
-	/**
-	 * Check if a location exists in the database
-	 */
-	public function locationExists(string $location): bool
-	{
-		return Record::whereRaw('LOWER(location) = LOWER(?)', [$location])
-			->exists();
-	}
 }
 

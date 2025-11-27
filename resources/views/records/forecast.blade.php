@@ -3,30 +3,24 @@
 @section('content')
 <div x-data="{ loading:false }" class="fade-enter fade-enter-active">
 <h2>AI Rice Yield Forecast</h2>
-<p style="color: #64748b; margin-bottom: 1rem;">Simply enter your location and planting date. Our AI uses <strong>geographic intelligence</strong> to understand Philippine regions, provinces, and municipalities. You can enter <strong>municipalities</strong> (e.g., Tacloban, Palo), <strong>provinces</strong> (e.g., Leyte), or <strong>regions</strong> (e.g., Eastern Visayas). The AI automatically identifies the region and uses regional averages for better predictions even if your exact location isn't in our database.</p>
+<p style="color: #64748b; margin-bottom: 1rem;">This version of the tool focuses solely on <strong>Palo, Leyte</strong>. Provide the planting date (and optional harvest date) and the AI will simulate the growing season based on Palo’s historical climate and agronomic patterns.</p>
+
+<div class="card" style="margin-bottom: 1rem; background:#f1f5f9">
+	<p style="margin:0;"><strong>Focus Area:</strong> {{ $focusLocation ?? 'Palo, Leyte' }} &middot; Eastern Visayas &middot; Type II climate</p>
+</div>
 
 <form x-on:submit="loading=true" action="{{ route('records.forecast.run') }}" method="POST" class="card">
     @csrf
     <fieldset role="group">
 		<label>
-			Location
-			<input type="text" name="location" list="locations" value="{{ old('location', $input['location'] ?? '') }}" placeholder="Enter any location (e.g., Nueva Ecija, Manila, etc.)" required>
-			<small style="color: #64748b; display: block; margin-top: 0.25rem;">Suggestions from database appear as you type, but you can enter any location.</small>
-			<datalist id="locations">
-				@foreach($availableLocations ?? [] as $loc)
-					<option value="{{ $loc }}">
-				@endforeach
-			</datalist>
-		</label>
-		<label>
 			Planting Date
-			<input type="date" name="date" value="{{ old('date', $input['date'] ?? date('Y-m-d')) }}" required>
+			<input type="date" name="planting_date" value="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" required>
 			<small style="color: #64748b; display: block; margin-top: 0.25rem;">When you plant the rice seeds</small>
 		</label>
 		<label>
 			Harvest Date (Optional)
-			<input type="date" name="harvest_date" value="{{ old('harvest_date', $input['harvest_date'] ?? '') }}" min="{{ old('date', $input['date'] ?? date('Y-m-d')) }}">
-			<small style="color: #64748b; display: block; margin-top: 0.25rem;">When you plan to harvest (default: ~120 days after planting)</small>
+			<input type="date" name="harvest_date" value="{{ old('harvest_date', $input['harvest_date'] ?? '') }}" min="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}">
+			<small style="color: #64748b; display: block; margin-top: 0.25rem;">Optional. If empty, we assume ~120 days after planting.</small>
 		</label>
     </fieldset>
     @if($weatherApiAvailable ?? false)
@@ -104,8 +98,8 @@
     <details style="margin-top: 1rem;">
         <summary>Estimated Parameters (Auto-calculated from Location & Date)</summary>
         <div style="background: #f9fafb; padding: 1rem; border-radius: 4px; margin-top: 0.5rem;">
-            <p><strong>Location:</strong> {{ $input['location'] ?? '-' }}</p>
-            <p><strong>Planting Date:</strong> {{ isset($input['date']) ? \Carbon\Carbon::parse($input['date'])->format('F d, Y') : '-' }}</p>
+            <p><strong>Location:</strong> {{ $focusLocation ?? 'Palo, Leyte' }} (fixed)</p>
+            <p><strong>Planting Date:</strong> {{ isset($input['planting_date']) ? \Carbon\Carbon::parse($input['planting_date'])->format('F d, Y') : '-' }}</p>
             <p><strong>Harvest Date:</strong> {{ isset($estimatedFeatures['harvestDate']) ? \Carbon\Carbon::parse($estimatedFeatures['harvestDate'])->format('F d, Y') : '-' }} 
                 <small style="color: #64748b;">({{ $estimatedFeatures['growingDays'] ?? 120 }} days growing period)</small>
             </p>
@@ -130,7 +124,7 @@
                 <p style="margin: 0; color: #1e40af; font-weight: bold;">🗺️ Using Regional Averages</p>
                 <small style="color: #1e3a8a;">
                     @if(isset($estimatedFeatures['isMunicipality']) && $estimatedFeatures['isMunicipality'])
-                        Municipality <strong>{{ $input['location'] ?? '' }}</strong> identified in <strong>{{ $estimatedFeatures['province'] ?? '' }}</strong> province, 
+                        Municipality <strong>{{ $focusLocation ?? 'Palo' }}</strong> identified in <strong>{{ $estimatedFeatures['province'] ?? '' }}</strong> province, 
                     @endif
                     Location not in database, but AI identified it as <strong>{{ $estimatedFeatures['region'] ?? 'Unknown' }}</strong> region. Using regional averages from similar locations in this area for better predictions.
                 </small>
@@ -178,6 +172,13 @@
 	</ul>
 </article>
 @endif
+
+@isset($yieldJustification)
+<div class="card" style="margin-top: 1rem; background:#fff7ed; border-left:4px solid #f97316;">
+	<h4 style="margin-top:0;">Why this yield?</h4>
+	<p style="margin-bottom:0;">{{ $yieldJustification }}</p>
+</div>
+@endisset
 @endsection
 
 
