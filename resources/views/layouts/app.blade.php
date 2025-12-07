@@ -10,21 +10,28 @@
 		:root { --brand:#0ea5e9; --brand-600:#0284c7; }
 		.btn-brand { background:var(--brand); border-color:var(--brand); }
 		.btn-brand:hover { background:var(--brand-600); border-color:var(--brand-600); }
-		.card { border:1px solid #e5e7eb; border-radius:8px; padding:1rem; background:#fff; }
+		.card { border:1px solid #e5e7eb; border-radius:12px; padding:1.5rem; background:#fff; }
 		.table-actions a, .table-actions button { margin-right:.25rem; }
 		.fade-enter { opacity:0; transform:translateY(4px); }
 		.fade-enter-active { opacity:1; transform:translateY(0); transition:all .18s ease; }
+		nav { margin-bottom: 2rem; }
+		nav ul { margin: 0; }
+		main.container { max-width: 1200px; }
+		@media (max-width: 768px) {
+			fieldset[role="group"], .forecast-dates { grid-template-columns: 1fr !important; }
+		}
 	</style>
 </head>
 <body>
 	<main class="container">
 		<nav>
 			<ul>
-				<li><strong>Rice Forecast</strong></li>
+				<li><strong><a href="{{ route('home') }}" style="text-decoration: none;">Rice Forecast</a></strong></li>
 			</ul>
 			<ul>
+				<li><a href="{{ route('home') }}">Forecast</a></li>
 				<li><a href="{{ route('records.index') }}">Records</a></li>
-				<li><a href="{{ route('records.forecast.form') }}">Forecast</a></li>
+				<li><a href="{{ route('records.data') }}">Data</a></li>
 			</ul>
 		</nav>
 		@if(session('status'))

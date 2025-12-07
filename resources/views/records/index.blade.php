@@ -9,8 +9,7 @@
 		<input data-search x-model="q" type="search" placeholder="Search by location or season...">
 	</div>
 	<div class="text-right">
-		<a href="{{ route('records.export') }}" role="button" class="secondary">Export CSV</a>
-		<a href="{{ route('records.import.form') }}" role="button">Import CSV</a>
+		<a href="{{ route('records.data') }}" role="button" class="secondary">Data Management</a>
 		<a href="{{ route('records.create') }}" role="button" class="btn-brand">Add Record</a>
 	</div>
 </div>
@@ -95,8 +94,8 @@
 			}
 			while (svg.firstChild) svg.removeChild(svg.firstChild);
 		const rows = [
-			@if(isset($records) && $records->count() > 0)
-				@foreach($records as $r)
+			@if(isset($allRecords) && $allRecords->count() > 0)
+				@foreach($allRecords as $r)
 				{ rainfall_mm: {{ (float)($r->rainfall_mm ?? 0) }}, temperature_c: {{ (float)($r->temperature_c ?? 0) }}, fertilizer_kg: {{ (float)($r->fertilizer_kg ?? 0) }}, area_ha: {{ (float)($r->area_ha ?? 0) }}, soil_ph: {{ (float)($r->soil_ph ?? 0) }}, y: {{ (float)($r->yield_t_ha ?? 0) }} },
 				@endforeach
 			@else
@@ -186,7 +185,7 @@ x-init="draw()"
 	<div style="width:100%;">
 		<svg x-ref="svg" viewBox="0 0 700 280" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;"></svg>
 	</div>
-	<p class="text-sm">Blue dots represent observed records (current page). Red line is the linear best-fit between the selected feature and yield.</p>
+	<p class="text-sm">Blue dots represent all observed records in the database. Red line shows the linear regression trend between the selected feature and yield. This visualization helps understand the relationship patterns that the AI models learn from.</p>
 </div>
 @endsection
 

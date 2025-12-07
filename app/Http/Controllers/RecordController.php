@@ -24,6 +24,8 @@ class RecordController extends Controller
 	{
 		try {
 			$records = Record::orderByDesc('created_at')->paginate(10);
+			// Get all records for graph (not paginated)
+			$allRecords = Record::whereNotNull('yield_t_ha')->get();
 		} catch (\Exception $e) {
 			// Fallback to empty paginated collection if database connection fails
 			$records = new \Illuminate\Pagination\LengthAwarePaginator(
@@ -33,8 +35,9 @@ class RecordController extends Controller
 				1, // current page
 				['path' => request()->url(), 'pageName' => 'page']
 			);
+			$allRecords = collect([]);
 		}
-		return view('records.index', compact('records'));
+		return view('records.index', compact('records', 'allRecords'));
 	}
 
 	public function create(): View
@@ -65,6 +68,11 @@ class RecordController extends Controller
 	{
 		$record->delete();
 		return redirect()->route('records.index')->with('status', 'Record deleted');
+	}
+
+	public function dataManagement(): View
+	{
+		return view('records.data');
 	}
 
 	public function importForm(): View
@@ -122,7 +130,7 @@ class RecordController extends Controller
 			$count++;
 		}
 		fclose($handle);
-		return redirect()->route('records.index')->with('status', "Imported $count rows");
+		return redirect()->route('records.data')->with('status', "Imported $count rows");
 	}
 
 	public function export(): StreamedResponse
@@ -257,38 +265,66 @@ class RecordController extends Controller
 			'model_type' => ['nullable','string','in:linear,decision_tree,neural,all'],
 		]);
 
-		$validator->after(function ($validator) {
+		$validator->after(function ($validator) use ($request) {
 			$data = $validator->getData();
+			
+			// Validate planting date
 			try {
 				$planting = Carbon::parse($data['planting_date']);
 			} catch (\Exception $e) {
-				$validator->errors()->add('planting_date', 'Planting date is invalid.');
+				$validator->errors()->add('planting_date', 'Planting date format is invalid. Please use a valid date.');
 				return;
 			}
 
+			// Check if planting date is in the future (too far)
+			$now = Carbon::now();
 			$earliest = Carbon::create(2015, 1, 1);
-			$latest = Carbon::now()->addYear();
+			$latest = $now->copy()->addYear();
 
-			if ($planting->lt($earliest) || $planting->gt($latest)) {
-				$validator->errors()->add('planting_date', 'Planting date should be between January 1, 2015 and ' . $latest->format('F d, Y') . '.');
+			if ($planting->lt($earliest)) {
+				$validator->errors()->add('planting_date', 'Planting date cannot be before January 1, 2015. Historical data is only available from 2015 onwards.');
+				return;
 			}
 
+			if ($planting->gt($latest)) {
+				$validator->errors()->add('planting_date', 'Planting date cannot be more than one year in the future. Please select a date up to ' . $latest->format('F d, Y') . '.');
+				return;
+			}
+
+			// Validate harvest date if provided
 			if (!empty($data['harvest_date'])) {
 				try {
 					$harvest = Carbon::parse($data['harvest_date']);
 				} catch (\Exception $e) {
-					$validator->errors()->add('harvest_date', 'Harvest date is invalid.');
+					$validator->errors()->add('harvest_date', 'Harvest date format is invalid. Please use a valid date.');
 					return;
 				}
 
+				// Check if harvest date is before or equal to planting date
 				if ($harvest->lte($planting)) {
-					$validator->errors()->add('harvest_date', 'Harvest date must be after the planting date.');
+					$validator->errors()->add('harvest_date', 'Harvest date must be after the planting date. Please select a date after ' . $planting->format('F d, Y') . '.');
 					return;
 				}
 
+				// Check if harvest date is too soon (less than minimum growing period)
 				$growingDays = $planting->diffInDays($harvest);
-				if ($growingDays < 60 || $growingDays > 210) {
-					$validator->errors()->add('harvest_date', 'Harvest date should be within 60 to 210 days after planting for rice in Palo, Leyte.');
+				if ($growingDays < 60) {
+					$minHarvest = $planting->copy()->addDays(60);
+					$validator->errors()->add('harvest_date', 'Harvest date is too early. Rice typically requires at least 60 days to grow. The earliest harvest date should be around ' . $minHarvest->format('F d, Y') . ' (60 days after planting).');
+					return;
+				}
+
+				// Check if harvest date is too far (more than maximum growing period)
+				if ($growingDays > 210) {
+					$maxHarvest = $planting->copy()->addDays(210);
+					$validator->errors()->add('harvest_date', 'Harvest date is unrealistic. Rice in Palo, Leyte typically matures within 210 days. The latest realistic harvest date would be around ' . $maxHarvest->format('F d, Y') . ' (210 days after planting).');
+					return;
+				}
+
+				// Check if harvest date is in the past (for historical validation)
+				if ($harvest->gt($now->copy()->addMonths(6))) {
+					$validator->errors()->add('harvest_date', 'Harvest date is too far in the future. Please select a date within 6 months from now.');
+					return;
 				}
 			}
 		});
@@ -371,6 +407,21 @@ class RecordController extends Controller
 
 		$yieldJustification = $this->buildYieldJustification($estimatedFeatures, $predictions);
 
+		// Get historical records for visualization
+		$historicalRecords = Record::whereNotNull('yield_t_ha')
+			->orderBy('yield_t_ha')
+			->get()
+			->map(function ($r) {
+				return [
+					'rainfall_mm' => (float)$r->rainfall_mm,
+					'temperature_c' => (float)$r->temperature_c,
+					'fertilizer_kg' => (float)$r->fertilizer_kg,
+					'area_ha' => (float)$r->area_ha,
+					'soil_ph' => (float)$r->soil_ph,
+					'yield_t_ha' => (float)$r->yield_t_ha,
+				];
+			});
+
 		return view('records.forecast', [
 			'predictions' => $predictions,
 			'modelType' => $modelType,
@@ -379,6 +430,7 @@ class RecordController extends Controller
 			'yieldJustification' => $yieldJustification,
 			'focusLocation' => self::FOCUS_LOCATION,
 			'weatherApiAvailable' => $weatherApiAvailable,
+			'historicalRecords' => $historicalRecords,
 		]);
 	}
 
