@@ -29,38 +29,52 @@
 					<span style="font-size: 1.5rem;">🌱</span>
 					<span style="font-weight: 700; font-size: 1.05rem;">Planting Date</span>
 				</span>
-				<input type="date" name="planting_date" value="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" required 
-					   style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: var(--card); transition: all 0.3s ease; width: 100%;" 
-					   onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
-					   onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'">
+                <input type="date" name="planting_date" value="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" required 
+                       style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: #ffffff; color: #000000; transition: all 0.3s ease; width: 100%; cursor: pointer; position: relative; z-index: 20; pointer-events: auto;" 
+                       onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
+                       onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'" aria-label="Planting date">
 				<small style="color: var(--muted-foreground); display: block; margin-top: 0.5rem; font-size: 0.875rem;">When you plant the rice seeds</small>
+				@error('planting_date')
+					<small style="color: #ef4444; display: block; margin-top: 0.25rem; font-size: 0.875rem;">{{ $message }}</small>
+				@enderror
 		</label>
 			<label style="margin-bottom: 0;">
 				<span style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; color: var(--foreground);">
 					<span style="font-size: 1.5rem;">✂️</span>
 					<span style="font-weight: 700; font-size: 1.05rem;">Harvest Date <span style="font-weight: 400; font-size: 0.9rem; color: var(--muted-foreground);">(Optional)</span></span>
 				</span>
-				<input type="date" name="harvest_date" value="{{ old('harvest_date', $input['harvest_date'] ?? '') }}" min="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" 
-					   style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: var(--card); transition: all 0.3s ease; width: 100%;"
-					   onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
-					   onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'">
+                <input type="date" name="harvest_date" value="{{ old('harvest_date', $input['harvest_date'] ?? '') }}" min="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" 
+                       style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: #ffffff; color: #000000; transition: all 0.3s ease; width: 100%; cursor: pointer; position: relative; z-index: 20; pointer-events: auto;" 
+                       onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
+                       onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'" aria-label="Harvest date">
 				<small style="color: var(--muted-foreground); display: block; margin-top: 0.5rem; font-size: 0.875rem;">Defaults to ~120 days after planting</small>
+				@error('harvest_date')
+					<small style="color: #ef4444; display: block; margin-top: 0.25rem; font-size: 0.875rem;">{{ $message }}</small>
+				@enderror
 		</label>
     </fieldset>
 		
     @if($weatherApiAvailable ?? false)
-		<label style="display: flex; align-items: center; gap: 1rem; padding: 1.25rem; background: var(--secondary-bg); border-radius: calc(var(--radius) * 2); margin-bottom: 1.5rem; border: 2px solid var(--secondary); cursor: pointer; transition: all 0.3s ease;" 
-			   onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-card)'; this.style.borderColor='var(--secondary-dark)'" 
-			   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='var(--shadow-soft)'; this.style.borderColor='var(--secondary)'">
-			<input type="checkbox" name="use_weather_api" value="1" {{ old('use_weather_api', true) ? 'checked' : '' }} style="width: 1.5rem; height: 1.5rem; cursor: pointer; accent-color: var(--secondary);">
+        <label tabindex="0" style="display: flex; align-items: center; gap: 1rem; padding: 1.25rem; background: #e0f2fe; border-radius: calc(var(--radius) * 2); margin-bottom: 1.5rem; border: 2px solid #0284c7; cursor: pointer; transition: all 0.3s ease;" 
+               onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-card)'; this.style.borderColor='#0369a1'" 
+               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='var(--shadow-soft)'; this.style.borderColor='#0284c7'"
+               onclick="(function(e){ e.stopPropagation(); var cb=document.getElementById('use_weather_api_cb'); if(cb && e.target !== cb){ cb.checked = !cb.checked; cb.dispatchEvent(new Event('change',{bubbles:true})); } })(event)"
+               onkeydown="(function(e){ if(e.key=== ' ' || e.key === 'Enter'){ e.preventDefault(); var cb=document.getElementById('use_weather_api_cb'); if(cb){ cb.checked = !cb.checked; cb.dispatchEvent(new Event('change',{bubbles:true})); } } })(event)">
+            <input type="checkbox" name="use_weather_api" value="1" {{ old('use_weather_api', true) ? 'checked' : '' }} style="width: 1.5rem; height: 1.5rem; cursor: pointer; accent-color: #0284c7; position: relative; z-index: 30; pointer-events: auto;" id="use_weather_api_cb">
 			<div style="flex: 1;">
-				<span style="font-weight: 700; color: var(--secondary-dark); font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+				<span style="font-weight: 700; color: #0369a1; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
 					<span style="font-size: 1.25rem;">🌤️</span>
 					<span>Use Weather API</span>
 				</span>
-				<small style="color: var(--muted-foreground); display: block; margin-top: 0.5rem; font-size: 0.9rem;">Improves accuracy for near-term predictions</small>
+				<small style="color: #0c4a6e; display: block; margin-top: 0.5rem; font-size: 0.9rem;">Improves accuracy for near-term predictions</small>
 			</div>
-    </label>
+            </div>
+            <button type="button" aria-controls="use_weather_api_cb" aria-pressed="false" title="Toggle Weather API" 
+                style="background: transparent; border: none; color: #0369a1; font-weight: 700; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 6px; position: relative; z-index: 40;"
+                onclick="(function(e){ e.stopPropagation(); var cb=document.getElementById('use_weather_api_cb'); if(cb){ cb.checked = !cb.checked; cb.dispatchEvent(new Event('change',{bubbles:true})); e.currentTarget.setAttribute('aria-pressed', cb.checked ? 'true' : 'false'); } })(event)">
+                Toggle
+            </button>
+        </label>
     @endif
 		
 		<label style="margin-bottom: 1.5rem;">
@@ -512,6 +526,44 @@
 	<p style="margin-bottom:0;">{{ $yieldJustification }}</p>
 </div>
 @endisset
+<script>
+// Ensure native date pickers open when supported and make checkbox label clicks reliable
+document.addEventListener('DOMContentLoaded', function () {
+    try {
+        // Attach showPicker() to date inputs when available
+        document.querySelectorAll('input[type="date"]').forEach(function (el) {
+            // Make extra-sure the input can receive pointer events
+            el.style.pointerEvents = 'auto';
+            el.style.position = el.style.position || 'relative';
+            el.style.zIndex = el.style.zIndex || '20';
+            if (typeof el.showPicker === 'function') {
+                el.addEventListener('click', function (e) {
+                    // Some browsers require showPicker to be invoked
+                    try { el.showPicker(); } catch (err) { /* ignore */ }
+                });
+            }
+        });
+
+        // Make label click toggle checkbox in case label click is intercepted
+        var cb = document.getElementById('use_weather_api_cb');
+        if (cb) {
+            var parentLabel = cb.closest('label');
+            if (parentLabel) {
+                parentLabel.addEventListener('click', function (e) {
+                    // If click didn't land on the checkbox itself, toggle it
+                    if (e.target !== cb) {
+                        cb.checked = !cb.checked;
+                        cb.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+            }
+        }
+    } catch (err) {
+        // silent fallback
+        console.error('Forecast input helper error', err);
+    }
+});
+</script>
 @endsection
 
 
