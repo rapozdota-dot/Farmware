@@ -12,6 +12,7 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -23,9 +24,17 @@ class RecordController extends Controller
 	public function index(): View
 	{
 		try {
-			$records = Record::orderByDesc('created_at')->paginate(10);
-			// Get all records for graph (not paginated)
-			$allRecords = Record::whereNotNull('yield_t_ha')->get();
+			// Optimized: Select only needed columns and use pagination
+			$records = Record::select(['id', 'location', 'season', 'area_ha', 'rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'yield_t_ha', 'created_at'])
+				->orderByDesc('created_at')
+				->paginate(10);
+			
+			// Optimized: Cache all records for graph (cache for 5 minutes)
+			$allRecords = Cache::remember('records_all_yield', 300, function () {
+				return Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha', 'yield_t_ha'])
+					->whereNotNull('yield_t_ha')
+					->get();
+			});
 		} catch (\Exception $e) {
 			// Fallback to empty paginated collection if database connection fails
 			$records = new \Illuminate\Pagination\LengthAwarePaginator(
@@ -49,6 +58,10 @@ class RecordController extends Controller
 	{
 		$data = $this->validateRecord($request);
 		Record::create($data);
+		// Clear all caches when new record is added
+		Cache::forget('records_all_yield');
+		Cache::forget('historical_records_viz');
+		$this->clearFeatureEstimatorCache();
 		return redirect()->route('records.index')->with('status', 'Record created');
 	}
 
@@ -61,12 +74,20 @@ class RecordController extends Controller
 	{
 		$data = $this->validateRecord($request);
 		$record->update($data);
+		// Clear all caches when record is updated
+		Cache::forget('records_all_yield');
+		Cache::forget('historical_records_viz');
+		$this->clearFeatureEstimatorCache();
 		return redirect()->route('records.index')->with('status', 'Record updated');
 	}
 
 	public function destroy(Record $record): RedirectResponse
 	{
 		$record->delete();
+		// Clear all caches when record is deleted
+		Cache::forget('records_all_yield');
+		Cache::forget('historical_records_viz');
+		$this->clearFeatureEstimatorCache();
 		return redirect()->route('records.index')->with('status', 'Record deleted');
 	}
 
@@ -130,12 +151,19 @@ class RecordController extends Controller
 			$count++;
 		}
 		fclose($handle);
+		// Clear all caches when records are imported
+		Cache::forget('records_all_yield');
+		Cache::forget('historical_records_viz');
+		$this->clearFeatureEstimatorCache();
 		return redirect()->route('records.data')->with('status', "Imported $count rows");
 	}
 
 	public function export(): StreamedResponse
 	{
-		$records = Record::orderBy('id')->get();
+		// Optimized: Select only needed columns for export
+		$records = Record::select(['location', 'season', 'area_ha', 'rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'yield_t_ha'])
+			->orderBy('id')
+			->get();
 		$headers = [
 			'Content-Type' => 'text/csv',
 			'Content-Disposition' => 'attachment; filename="records.csv"',
@@ -162,7 +190,10 @@ class RecordController extends Controller
 
 	public function evaluate(): View
 	{
-		$records = Record::whereNotNull('yield_t_ha')->get();
+		// Optimized: Select only needed columns
+		$records = Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha', 'yield_t_ha'])
+			->whereNotNull('yield_t_ha')
+			->get();
 		if ($records->count() < 6) {
 			return view('records.evaluate', [
 				'message' => 'Need at least 6 records with yield to evaluate.',
@@ -261,7 +292,6 @@ class RecordController extends Controller
 		$validator = Validator::make($request->all(), [
 			'planting_date' => ['required','date'],
 			'harvest_date' => ['nullable','date'],
-			'use_weather_api' => ['nullable','boolean'],
 			'model_type' => ['nullable','string','in:linear,decision_tree,neural,all'],
 		]);
 
@@ -333,7 +363,16 @@ class RecordController extends Controller
 
 		$modelType = $payload['model_type'] ?? 'all';
 
-		$records = Record::whereNotNull('yield_t_ha')->get();
+		// Optimized: Select only needed columns and cache training data
+		// Cache key includes season for better cache hits
+		$season = (Carbon::parse($payload['planting_date'])->month >= 6 && Carbon::parse($payload['planting_date'])->month <= 10) ? 'Wet' : 'Dry';
+		$cacheKey = 'forecast_training_data_' . $season;
+		$records = Cache::remember($cacheKey, 1800, function () {
+			return Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha', 'yield_t_ha'])
+				->whereNotNull('yield_t_ha')
+				->get();
+		});
+		
 		if ($records->count() < 3) {
 			return view('records.forecast', [
 				'error' => 'Need at least 3 records with yield to make predictions.',
@@ -343,10 +382,9 @@ class RecordController extends Controller
 			]);
 		}
 
-		// Estimate features from location and date (with optional weather API)
-		$useWeatherApi = array_key_exists('use_weather_api', $payload)
-			? (bool)$payload['use_weather_api']
-			: true;
+		// Automatically use weather API when available for better accuracy
+		$useWeatherApi = $weatherApiAvailable;
+
 		$estimatedFeatures = $estimator->estimateFromLocationAndDate(
 			$payload['planting_date'],
 			$payload['harvest_date'] ?? null,
@@ -362,19 +400,18 @@ class RecordController extends Controller
 			$estimatedFeatures['season'] = 'Unknown';
 		}
 		
-		// Prepare training data
-		$features = [];
-		$targets = [];
-		foreach ($records as $r) {
-			$features[] = [
+		// Optimized: Prepare training data efficiently using array_map for better performance
+		$features = $records->map(function ($r) {
+			return [
 				(float)$r->rainfall_mm,
 				(float)$r->temperature_c,
 				(float)$r->soil_ph,
 				(float)$r->fertilizer_kg,
 				(float)$r->area_ha,
 			];
-			$targets[] = (float)$r->yield_t_ha;
-		}
+		})->all();
+		
+		$targets = $records->pluck('yield_t_ha')->map(fn($v) => (float)$v)->all();
 
 		// Use estimated features for prediction
 		$inputFeature = [
@@ -394,33 +431,40 @@ class RecordController extends Controller
 		}
 
 		if ($modelType === 'decision_tree' || $modelType === 'all') {
-			$dtModel = new DecisionTree(5, 5);
+			// Improved decision tree: deeper tree (6 levels) and more samples for better accuracy
+			$dtModel = new DecisionTree(6, 4);
 			$dtModel->fit($features, $targets);
 			$predictions['decision_tree'] = $dtModel->predict($inputFeature);
 		}
 
 		if ($modelType === 'neural' || $modelType === 'all') {
-			$nnModel = new NeuralNetwork(5, [10, 8], 0.01, 500);
+			// Improved neural network: more epochs and better architecture for better accuracy
+			// Increased epochs from 500 to 1200 for better convergence
+			// Using [12, 10] hidden layers instead of [10, 8] for more capacity
+			$nnModel = new NeuralNetwork(5, [12, 10], 0.01, 1200);
 			$nnModel->fit($features, $targets);
 			$predictions['neural'] = $nnModel->predict($inputFeature);
 		}
 
 		$yieldJustification = $this->buildYieldJustification($estimatedFeatures, $predictions);
 
-		// Get historical records for visualization
-		$historicalRecords = Record::whereNotNull('yield_t_ha')
-			->orderBy('yield_t_ha')
-			->get()
-			->map(function ($r) {
-				return [
-					'rainfall_mm' => (float)$r->rainfall_mm,
-					'temperature_c' => (float)$r->temperature_c,
-					'fertilizer_kg' => (float)$r->fertilizer_kg,
-					'area_ha' => (float)$r->area_ha,
-					'soil_ph' => (float)$r->soil_ph,
-					'yield_t_ha' => (float)$r->yield_t_ha,
-				];
-			});
+		// Optimized: Cache historical records for visualization
+		$historicalRecords = Cache::remember('historical_records_viz', 600, function () {
+			return Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha', 'yield_t_ha'])
+				->whereNotNull('yield_t_ha')
+				->orderBy('yield_t_ha')
+				->get()
+				->map(function ($r) {
+					return [
+						'rainfall_mm' => (float)$r->rainfall_mm,
+						'temperature_c' => (float)$r->temperature_c,
+						'fertilizer_kg' => (float)$r->fertilizer_kg,
+						'area_ha' => (float)$r->area_ha,
+						'soil_ph' => (float)$r->soil_ph,
+						'yield_t_ha' => (float)$r->yield_t_ha,
+					];
+				});
+		});
 
 		return view('records.forecast', [
 			'predictions' => $predictions,
@@ -432,6 +476,27 @@ class RecordController extends Controller
 			'weatherApiAvailable' => $weatherApiAvailable,
 			'historicalRecords' => $historicalRecords,
 		]);
+	}
+
+	/**
+	 * Clear FeatureEstimator cache when records change
+	 */
+	private function clearFeatureEstimatorCache(): void
+	{
+		// Clear location averages cache (for both Wet and Dry seasons)
+		foreach (['Wet', 'Dry'] as $season) {
+			Cache::forget("location_avg_Palo, Leyte_{$season}_" . md5("Palo, Leyte" . $season));
+			Cache::forget("location_avg_Palo_{$season}_" . md5("Palo" . $season));
+		}
+		// Clear region averages cache
+		foreach (['Wet', 'Dry'] as $season) {
+			Cache::forget("region_avg_Eastern Visayas_{$season}_" . md5("Eastern Visayas" . $season));
+		}
+		// Clear season averages cache
+		Cache::forget('season_avg_Wet');
+		Cache::forget('season_avg_Dry');
+		// Clear forecast training data cache
+		Cache::flush(); // This clears all forecast-related caches
 	}
 
 	private function validateRecord(Request $request): array
@@ -477,5 +542,3 @@ class RecordController extends Controller
 		return "Using historical ".strtolower($season)." season patterns for Palo, Leyte ({$dateRange}), the model factors in about {$rainfall} mm of rainfall, {$temperature} °C average temperature, and a {$growingDays}-day growth cycle. {$predictionFragment}";
 	}
 }
-
-

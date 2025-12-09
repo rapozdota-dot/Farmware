@@ -9,6 +9,31 @@
 	<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 	<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+	<script>
+		// Suppress Vite HMR errors that don't affect functionality
+		window.addEventListener('error', function(e) {
+			// Suppress Vite HMR profile errors
+			if (e.message && (
+				e.message.includes('profile') && 
+				e.message.includes('onUpdate') ||
+				e.message.includes('Cannot read properties of undefined')
+			)) {
+				e.preventDefault();
+				return false;
+			}
+		}, true);
+		
+		// Also catch unhandled promise rejections from Vite HMR
+		window.addEventListener('unhandledrejection', function(e) {
+			if (e.reason && (
+				(e.reason.message && e.reason.message.includes('profile')) ||
+				(e.reason.message && e.reason.message.includes('onUpdate'))
+			)) {
+				e.preventDefault();
+				return false;
+			}
+		});
+	</script>
 	<style>
 		@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap');
 		
@@ -59,6 +84,10 @@
 			--gradient-neural: linear-gradient(90deg, var(--neural) 0%, var(--neural-dark) 100%);
 			--gradient-tree: linear-gradient(90deg, var(--tree) 0%, var(--tree-dark) 100%);
 			--gradient-linear: linear-gradient(90deg, var(--linear) 0%, var(--linear-dark) 100%);
+
+            /* Override Pico CSS focus colors globally */
+            --pico-form-element-focus-color: var(--primary);
+            --pico-primary-focus: var(--primary);
 		}
 		
 		* {
@@ -322,7 +351,7 @@
 			transform: scale(1.01);
 		}
 		
-		/* Inputs */
+		/* Inputs - Strong Overrides for Black Border */
 		input, select, textarea {
 			background: var(--card) !important;
 			border: 2px solid var(--border) !important;
@@ -331,10 +360,61 @@
 			transition: all 0.3s ease;
 		}
 		
-		input:focus, select:focus, textarea:focus {
+		input:focus, select:focus, textarea:focus,
+        input[type="date"]:focus, input[type="date"]:active,
+        input[type="text"]:focus, input[type="date"]:focus-visible {
 			border-color: var(--primary) !important;
+            /* Use shadow for glow, kill default outline */
 			box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1) !important;
-			outline: none;
+			outline: none !important;
+            --pico-box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1) !important;
+		}
+		
+		/* Override Pico CSS black borders completely */
+		input[type="date"]:focus,
+		input[type="date"]:active,
+		input[type="text"]:focus,
+		input[type="number"]:focus,
+		select:focus,
+		textarea:focus {
+			border: 2px solid var(--primary) !important;
+			box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1) !important;
+			outline: none !important;
+		}
+		
+		/* Remove any black outline from Pico CSS */
+		:is(input, select, textarea):is(:focus, :focus-visible, :active) {
+			border-color: var(--primary) !important;
+			outline: none !important;
+			box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1) !important;
+		}
+		
+		/* Additional overrides for Pico CSS input styling */
+		[type="date"]:focus,
+		[type="date"]:focus-visible,
+		[type="text"]:focus,
+		[type="text"]:focus-visible,
+		[type="number"]:focus,
+		[type="number"]:focus-visible,
+		select:focus,
+		select:focus-visible {
+			border: 2px solid var(--primary) !important;
+			outline: 2px solid transparent !important;
+			outline-offset: 2px !important;
+			box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1) !important;
+		}
+		
+		/* Ensure date inputs are clickable and visible */
+		input[type="date"] {
+			position: relative;
+			z-index: 1000;
+		}
+		
+		/* Remove Pico CSS accent color override */
+		input:not([type="submit"]):not([type="button"]):not([type="reset"]):focus,
+		select:focus,
+		textarea:focus {
+			accent-color: var(--primary) !important;
 		}
 		
 		/* Forms */
@@ -449,5 +529,3 @@
 	</main>
 </body>
 </html>
-
-

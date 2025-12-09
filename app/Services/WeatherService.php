@@ -34,23 +34,39 @@ class WeatherService
 		
 		return Cache::remember($cacheKey, 3600, function () use ($location, $country) {
 			try {
-				$response = Http::timeout(5)->get("{$this->baseUrl}/weather", [
-					'q' => "{$location},{$country}",
-					'appid' => $this->apiKey,
-					'units' => 'metric',
-				]);
+				// Try different location formats for better compatibility
+				$locationFormats = [
+					"{$location},{$country}",
+					$location,
+					"Palo,PH", // Fallback for Palo, Leyte
+				];
+				
+				foreach ($locationFormats as $loc) {
+					$response = Http::timeout(10)->get("{$this->baseUrl}/weather", [
+						'q' => $loc,
+						'appid' => $this->apiKey,
+						'units' => 'metric',
+					]);
 
-				if ($response->successful()) {
-					$data = $response->json();
-					return [
-						'temperature_c' => $data['main']['temp'] ?? null,
-						'humidity' => $data['main']['humidity'] ?? null,
-						'pressure' => $data['main']['pressure'] ?? null,
-						'rainfall_mm' => $data['rain']['1h'] ?? ($data['rain']['3h'] ?? 0) / 3,
-						'wind_speed' => $data['wind']['speed'] ?? null,
-						'description' => $data['weather'][0]['description'] ?? null,
-						'timestamp' => now(),
-					];
+					if ($response->successful()) {
+						$data = $response->json();
+						return [
+							'temperature_c' => $data['main']['temp'] ?? null,
+							'humidity' => $data['main']['humidity'] ?? null,
+							'pressure' => $data['main']['pressure'] ?? null,
+							'rainfall_mm' => $data['rain']['1h'] ?? ($data['rain']['3h'] ?? 0) / 3,
+							'wind_speed' => $data['wind']['speed'] ?? null,
+							'description' => $data['weather'][0]['description'] ?? null,
+							'timestamp' => now(),
+						];
+					} elseif ($response->status() === 404) {
+						// Location not found, try next format
+						continue;
+					} else {
+						// Other error, log and break
+						\Log::warning("Weather API error for {$loc}: " . $response->status());
+						break;
+					}
 				}
 			} catch (\Exception $e) {
 				// Log error but don't break the application
@@ -74,26 +90,44 @@ class WeatherService
 		
 		return Cache::remember($cacheKey, 1800, function () use ($location, $country) {
 			try {
-				$response = Http::timeout(5)->get("{$this->baseUrl}/forecast", [
-					'q' => "{$location},{$country}",
-					'appid' => $this->apiKey,
-					'units' => 'metric',
-				]);
+				// Try different location formats for better compatibility
+				$locationFormats = [
+					"{$location},{$country}",
+					$location,
+					"Palo,PH", // Fallback for Palo, Leyte
+				];
+				
+				foreach ($locationFormats as $loc) {
+					$response = Http::timeout(10)->get("{$this->baseUrl}/forecast", [
+						'q' => $loc,
+						'appid' => $this->apiKey,
+						'units' => 'metric',
+					]);
 
-				if ($response->successful()) {
-					$data = $response->json();
-					$forecast = [];
-					
-					foreach ($data['list'] ?? [] as $item) {
-						$forecast[] = [
-							'date' => Carbon::parse($item['dt'])->format('Y-m-d'),
-							'temperature_c' => $item['main']['temp'] ?? null,
-							'rainfall_mm' => $item['rain']['3h'] ?? 0,
-							'humidity' => $item['main']['humidity'] ?? null,
-						];
+					if ($response->successful()) {
+						$data = $response->json();
+						$forecast = [];
+						
+						foreach ($data['list'] ?? [] as $item) {
+							$forecast[] = [
+								'date' => Carbon::parse($item['dt'])->format('Y-m-d'),
+								'temperature_c' => $item['main']['temp'] ?? null,
+								'rainfall_mm' => $item['rain']['3h'] ?? ($item['rain']['1h'] ?? 0),
+								'humidity' => $item['main']['humidity'] ?? null,
+							];
+						}
+						
+						if (!empty($forecast)) {
+							return $forecast;
+						}
+					} elseif ($response->status() === 404) {
+						// Location not found, try next format
+						continue;
+					} else {
+						// Other error, log and break
+						\Log::warning("Weather Forecast API error for {$loc}: " . $response->status());
+						break;
 					}
-					
-					return $forecast;
 				}
 			} catch (\Exception $e) {
 				\Log::warning("Weather Forecast API error: " . $e->getMessage());
@@ -147,34 +181,52 @@ class WeatherService
 
 		$now = Carbon::now();
 		
-		// If planting is in the future or very recent, try to use forecast
-		if ($plantingDate->isFuture() || $plantingDate->diffInDays($now) < 5) {
+		// Try to use forecast for future dates or recent dates (within 5 days)
+		// Also try for dates up to 5 days in the past (to catch recent plantings)
+		$daysDiff = $plantingDate->diffInDays($now, false);
+		
+		if ($plantingDate->isFuture() || $daysDiff >= -5) {
 			$forecast = $this->getForecast($location, $country);
 			
-			if ($forecast) {
+			if ($forecast && !empty($forecast)) {
 				// Filter forecast for growing season period
 				$seasonForecast = array_filter($forecast, function ($item) use ($plantingDate, $harvestDate) {
-					$itemDate = Carbon::parse($item['date']);
-					return $itemDate->between($plantingDate, $harvestDate);
+					try {
+						$itemDate = Carbon::parse($item['date']);
+						return $itemDate->between($plantingDate, $harvestDate);
+					} catch (\Exception $e) {
+						return false;
+					}
 				});
 				
 				if (!empty($seasonForecast)) {
-					$temperatures = array_column($seasonForecast, 'temperature_c');
-					$rainfalls = array_column($seasonForecast, 'rainfall_mm');
+					$temperatures = array_filter(array_column($seasonForecast, 'temperature_c'), fn($v) => $v !== null);
+					$rainfalls = array_filter(array_column($seasonForecast, 'rainfall_mm'), fn($v) => $v !== null);
 					
-					return [
-						'avg_temperature_c' => array_sum($temperatures) / count($temperatures),
-						'total_rainfall_mm' => array_sum($rainfalls),
-						'avg_rainfall_mm' => array_sum($rainfalls) / count($rainfalls),
-						'data_source' => 'weather_forecast',
-						'forecast_days' => count($seasonForecast),
-					];
+					if (!empty($temperatures) && !empty($rainfalls)) {
+						return [
+							'avg_temperature_c' => array_sum($temperatures) / count($temperatures),
+							'total_rainfall_mm' => array_sum($rainfalls),
+							'avg_rainfall_mm' => array_sum($rainfalls) / count($rainfalls),
+							'data_source' => 'weather_forecast',
+							'forecast_days' => count($seasonForecast),
+						];
+					}
 				}
 			}
 		}
 		
-		// Fallback to current weather as approximation
-		return $this->getAverageWeatherForPeriod($location, $plantingDate, $harvestDate, $country);
+		// Fallback to current weather as approximation for any date
+		$current = $this->getCurrentWeather($location, $country);
+		if ($current) {
+			return [
+				'avg_temperature_c' => $current['temperature_c'],
+				'avg_rainfall_mm' => $current['rainfall_mm'] ?? 0,
+				'data_source' => 'current_weather_approximation',
+			];
+		}
+		
+		return null;
 	}
 }
 

@@ -19,7 +19,7 @@
 			<span style="font-size: 1.5rem;">📍</span>
 			<span><strong style="color: var(--primary-dark);">Focus Area:</strong> <span style="color: var(--foreground);">{{ $focusLocation ?? 'Palo, Leyte' }} &middot; Eastern Visayas &middot; Type II climate</span></span>
 		</p>
-</div>
+    </div>
 
 	<form x-on:submit="loading=true" action="{{ route('records.forecast.run') }}" method="POST" class="card animate-fade-in stagger-2" style="max-width: 700px; margin: 0 auto; box-shadow: var(--shadow-card); border: none; background: var(--gradient-card);">
     @csrf
@@ -29,53 +29,28 @@
 					<span style="font-size: 1.5rem;">🌱</span>
 					<span style="font-weight: 700; font-size: 1.05rem;">Planting Date</span>
 				</span>
-                <input type="date" name="planting_date" value="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" required 
-                       style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: #ffffff; color: #000000; transition: all 0.3s ease; width: 100%; cursor: pointer; position: relative; z-index: 20; pointer-events: auto;" 
-                       onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
-                       onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'" aria-label="Planting date">
+                <input type="date" name="planting_date" id="planting_date_input" value="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" required 
+                       style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: #ffffff; color: #000000; transition: all 0.3s ease; width: 100%; cursor: pointer; position: relative; z-index: 1000; pointer-events: auto; appearance: auto;" 
+                       aria-label="Planting date">
 				<small style="color: var(--muted-foreground); display: block; margin-top: 0.5rem; font-size: 0.875rem;">When you plant the rice seeds</small>
 				@error('planting_date')
 					<small style="color: #ef4444; display: block; margin-top: 0.25rem; font-size: 0.875rem;">{{ $message }}</small>
 				@enderror
-		</label>
+		    </label>
 			<label style="margin-bottom: 0;">
 				<span style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; color: var(--foreground);">
 					<span style="font-size: 1.5rem;">✂️</span>
 					<span style="font-weight: 700; font-size: 1.05rem;">Harvest Date <span style="font-weight: 400; font-size: 0.9rem; color: var(--muted-foreground);">(Optional)</span></span>
 				</span>
-                <input type="date" name="harvest_date" value="{{ old('harvest_date', $input['harvest_date'] ?? '') }}" min="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" 
-                       style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: #ffffff; color: #000000; transition: all 0.3s ease; width: 100%; cursor: pointer; position: relative; z-index: 20; pointer-events: auto;" 
-                       onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
-                       onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'" aria-label="Harvest date">
+                <input type="date" name="harvest_date" id="harvest_date_input" value="{{ old('harvest_date', $input['harvest_date'] ?? '') }}" min="{{ old('planting_date', $input['planting_date'] ?? date('Y-m-d')) }}" 
+                       style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: #ffffff; color: #000000; transition: all 0.3s ease; width: 100%; cursor: pointer; position: relative; z-index: 1000; pointer-events: auto; appearance: auto;" 
+                       aria-label="Harvest date">
 				<small style="color: var(--muted-foreground); display: block; margin-top: 0.5rem; font-size: 0.875rem;">Defaults to ~120 days after planting</small>
 				@error('harvest_date')
 					<small style="color: #ef4444; display: block; margin-top: 0.25rem; font-size: 0.875rem;">{{ $message }}</small>
 				@enderror
-		</label>
-    </fieldset>
-		
-    @if($weatherApiAvailable ?? false)
-        <label tabindex="0" style="display: flex; align-items: center; gap: 1rem; padding: 1.25rem; background: #e0f2fe; border-radius: calc(var(--radius) * 2); margin-bottom: 1.5rem; border: 2px solid #0284c7; cursor: pointer; transition: all 0.3s ease;" 
-               onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-card)'; this.style.borderColor='#0369a1'" 
-               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='var(--shadow-soft)'; this.style.borderColor='#0284c7'"
-               onclick="(function(e){ e.stopPropagation(); var cb=document.getElementById('use_weather_api_cb'); if(cb && e.target !== cb){ cb.checked = !cb.checked; cb.dispatchEvent(new Event('change',{bubbles:true})); } })(event)"
-               onkeydown="(function(e){ if(e.key=== ' ' || e.key === 'Enter'){ e.preventDefault(); var cb=document.getElementById('use_weather_api_cb'); if(cb){ cb.checked = !cb.checked; cb.dispatchEvent(new Event('change',{bubbles:true})); } } })(event)">
-            <input type="checkbox" name="use_weather_api" value="1" {{ old('use_weather_api', true) ? 'checked' : '' }} style="width: 1.5rem; height: 1.5rem; cursor: pointer; accent-color: #0284c7; position: relative; z-index: 30; pointer-events: auto;" id="use_weather_api_cb">
-			<div style="flex: 1;">
-				<span style="font-weight: 700; color: #0369a1; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
-					<span style="font-size: 1.25rem;">🌤️</span>
-					<span>Use Weather API</span>
-				</span>
-				<small style="color: #0c4a6e; display: block; margin-top: 0.5rem; font-size: 0.9rem;">Improves accuracy for near-term predictions</small>
-			</div>
-            </div>
-            <button type="button" aria-controls="use_weather_api_cb" aria-pressed="false" title="Toggle Weather API" 
-                style="background: transparent; border: none; color: #0369a1; font-weight: 700; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 6px; position: relative; z-index: 40;"
-                onclick="(function(e){ e.stopPropagation(); var cb=document.getElementById('use_weather_api_cb'); if(cb){ cb.checked = !cb.checked; cb.dispatchEvent(new Event('change',{bubbles:true})); e.currentTarget.setAttribute('aria-pressed', cb.checked ? 'true' : 'false'); } })(event)">
-                Toggle
-            </button>
-        </label>
-    @endif
+		    </label>
+        </fieldset>
 		
 		<label style="margin-bottom: 1.5rem;">
 			<span style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; color: var(--foreground);">
@@ -83,9 +58,7 @@
 				<span style="font-weight: 700; font-size: 1.05rem;">AI Model</span>
 			</span>
 			<select name="model_type" 
-					style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: var(--card); transition: all 0.3s ease; width: 100%; cursor: pointer;"
-					onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(34, 197, 94, 0.1)'" 
-					onblur="this.style.borderColor='var(--border)'; this.style.boxShadow='none'">
+					style="font-size: 1rem; padding: 1rem; border-radius: var(--radius); border: 2px solid var(--border); background: var(--card); transition: all 0.3s ease; width: 100%; cursor: pointer;">
             <option value="all" {{ old('model_type', $modelType ?? 'all') === 'all' ? 'selected' : '' }}>All Models (Compare All 3)</option>
             <option value="neural" {{ old('model_type', $modelType ?? 'all') === 'neural' ? 'selected' : '' }}>Neural Network (Advanced) - Most Accurate</option>
             <option value="decision_tree" {{ old('model_type', $modelType ?? 'all') === 'decision_tree' ? 'selected' : '' }}>Decision Tree (Medium) - Interpretable</option>
@@ -97,7 +70,7 @@
 				style="width: 100%; padding: 1.25rem; font-size: 1.15rem; font-weight: 700; margin-top: 1rem; border-radius: var(--radius); letter-spacing: 0.5px;"
 				:style="loading ? 'opacity: 0.7; cursor: not-allowed;' : ''">
 			<span x-show="!loading">🚀 Predict Yield</span>
-			<span x-show="loading">⏳ AI is analyzing...</span>
+			<span x-show="loading" style="display: none;">⏳ AI is analyzing...</span>
 		</button>
 </form>
 
@@ -119,7 +92,6 @@
         <span>Prediction Results</span>
     </h3>
     
-    <!-- Prediction Cards Grid -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
     @if(isset($predictions['neural']))
         <div class="prediction-card neural animate-fade-in" style="animation-delay: 0.1s;">
@@ -227,7 +199,6 @@
         <p style="text-align: center; color: var(--muted-foreground); margin-bottom: 2rem; font-size: 1rem;">See how your prediction compares to historical yields</p>
         
         <div style="max-width: 800px; margin: 0 auto;">
-            <!-- Historical Statistics -->
             <div style="background: var(--card); padding: 2rem; border-radius: calc(var(--radius) * 2); margin-bottom: 2rem; border: 1px solid var(--border); box-shadow: var(--shadow-soft);">
                 <h5 style="margin-top: 0; color: var(--foreground); margin-bottom: 1.5rem; font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
                     <span style="font-size: 1.5rem;">📊</span>
@@ -262,7 +233,6 @@
                 </div>
             </div>
             
-            <!-- Visual Comparison Bar Chart -->
             <div style="background: var(--card); padding: 2rem; border-radius: calc(var(--radius) * 2); border: 1px solid var(--border); box-shadow: var(--shadow-soft);">
                 <h5 style="margin-top: 0; color: var(--foreground); margin-bottom: 2rem; font-size: 1.25rem; font-weight: 700;">📊 Visual Comparison</h5>
                 
@@ -327,7 +297,6 @@
                 </div>
                 @endif
                 
-                <!-- Historical Average Reference -->
                 <div style="margin-top: 2rem; padding-top: 2rem; border-top: 2px dashed #cbd5e1;">
                     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem;">
                         <div style="width: 140px; font-weight: 700; color: #475569; font-size: 1rem;">Historical Avg:</div>
@@ -342,7 +311,6 @@
                 </div>
             </div>
             
-            <!-- Comparison Summary -->
             <div style="background: var(--card); padding: 2rem; border-radius: calc(var(--radius) * 2); margin-top: 2rem; border: 1px solid var(--border); box-shadow: var(--shadow-soft);">
                 <h5 style="margin-top: 0; color: var(--foreground); margin-bottom: 1.5rem; font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
                     <span style="font-size: 1.5rem;">💡</span>
@@ -424,11 +392,23 @@
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem;">
             @if(isset($estimatedFeatures['weatherApiUsed']) && $estimatedFeatures['weatherApiUsed'])
-            <p style="color: #059669; font-weight: bold;">🌤️ Weather API data used for forecast</p>
+            <div style="margin-top: 1.5rem; padding: 1rem; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 12px; border-left: 4px solid var(--emerald);">
+                <p style="margin: 0; color: var(--emerald-dark); font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>🌤️</span>
+                    <span>Weather API data used for forecast</span>
+                </p>
+            </div>
+            @else
+            <div style="margin-top: 1.5rem; padding: 1rem; background: var(--muted); border-radius: 12px; border-left: 4px solid var(--secondary);">
+                <p style="margin: 0; color: var(--secondary-dark); font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>📅</span>
+                    <span>Using Historical Averages (Weather API Off)</span>
+                </p>
+            </div>
             @endif
             
             @if(isset($estimatedFeatures['hasLocationData']) && $estimatedFeatures['hasLocationData'])
-            <div style="background: #d1fae5; border-left: 4px solid #10b981; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px;">
+            <div style="background: #d1fae5; border-left: 4px solid #10b981; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; margin-top: 0.5rem;">
                 <p style="margin: 0; color: #065f46; font-weight: bold;">✓ Location-Specific Data Found</p>
                 <small style="color: #047857;">Using historical averages specific to this location and season for more accurate predictions.</small>
                 @if(isset($estimatedFeatures['province']))
@@ -439,7 +419,7 @@
                 @endif
             </div>
             @elseif(isset($estimatedFeatures['hasRegionData']) && $estimatedFeatures['hasRegionData'])
-            <div style="background: #dbeafe; border-left: 4px solid #3b82f6; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px;">
+            <div style="background: #dbeafe; border-left: 4px solid #3b82f6; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; margin-top: 0.5rem;">
                 <p style="margin: 0; color: #1e40af; font-weight: bold;">🗺️ Using Regional Averages</p>
                 <small style="color: #1e3a8a;">
                     @if(isset($estimatedFeatures['isMunicipality']) && $estimatedFeatures['isMunicipality'])
@@ -457,14 +437,14 @@
                 <p style="margin: 0.25rem 0 0 0; color: #1e3a8a; font-size: 0.875rem;"><strong>Climate Zone:</strong> {{ $estimatedFeatures['climateZone'] }}</p>
                 @endif
             </div>
-            @elseif(isset($estimatedFeatures['hasLocationData']) && !$estimatedFeatures['hasLocationData'])
-            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px;">
+            @elseif(isset($estimatedFeatures['hasLocationData']) && !$estimatedFeatures['hasLocationData'] && !isset($estimatedFeatures['hasRegionData']))
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; margin-top: 0.5rem;">
                 <p style="margin: 0; color: #92400e; font-weight: bold;">ℹ️ Using General Season Averages</p>
                 <small style="color: #78350f;">
                     @if(isset($estimatedFeatures['region']))
-                        Location not in database, but identified as <strong>{{ $estimatedFeatures['region'] }}</strong>. Using general {{ $estimatedFeatures['season'] ?? '' }} season averages.
+                        Using general {{ $estimatedFeatures['season'] ?? '' }} season averages from all locations in the database. Location-specific data not available for this season.
                     @else
-                        Location not recognized. Using general {{ $estimatedFeatures['season'] ?? '' }} season averages from all locations.
+                        Using general {{ $estimatedFeatures['season'] ?? '' }} season averages from all locations in the database.
                     @endif
                 </small>
             </div>
@@ -493,15 +473,6 @@
                 </div>
             </div>
             
-            @if(isset($estimatedFeatures['weatherApiUsed']) && $estimatedFeatures['weatherApiUsed'])
-            <div style="margin-top: 1.5rem; padding: 1rem; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 12px; border-left: 4px solid var(--emerald);">
-                <p style="margin: 0; color: var(--emerald-dark); font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
-                    <span>🌤️</span>
-                    <span>Weather API data used for forecast</span>
-                </p>
-            </div>
-            @endif
-            
             <div style="margin-top: 1.5rem; padding: 1rem; background: var(--muted); border-radius: var(--radius);">
                 <small style="color: var(--muted-foreground); font-size: 0.875rem; line-height: 1.6;">{{ $estimatedFeatures['dataSource'] ?? 'These values are based on historical averages.' }}</small>
             </div>
@@ -526,44 +497,68 @@
 	<p style="margin-bottom:0;">{{ $yieldJustification }}</p>
 </div>
 @endisset
+
 <script>
-// Ensure native date pickers open when supported and make checkbox label clicks reliable
+// Enhanced date picker script: ensures calendar opens on click
 document.addEventListener('DOMContentLoaded', function () {
-    try {
-        // Attach showPicker() to date inputs when available
-        document.querySelectorAll('input[type="date"]').forEach(function (el) {
-            // Make extra-sure the input can receive pointer events
-            el.style.pointerEvents = 'auto';
-            el.style.position = el.style.position || 'relative';
-            el.style.zIndex = el.style.zIndex || '20';
-            if (typeof el.showPicker === 'function') {
-                el.addEventListener('click', function (e) {
-                    // Some browsers require showPicker to be invoked
-                    try { el.showPicker(); } catch (err) { /* ignore */ }
+    const plantingInput = document.getElementById('planting_date_input');
+    const harvestInput = document.getElementById('harvest_date_input');
+    
+    // Function to open date picker
+    function openDatePicker(input) {
+        if (!input) return;
+        
+        try {
+            // Modern browsers support showPicker()
+            if (typeof input.showPicker === 'function') {
+                input.showPicker().catch(function(err) {
+                    // If showPicker fails, fall back to focus
+                    input.focus();
+                    input.click();
                 });
+            } else {
+                // Fallback for older browsers
+                input.focus();
+                // Trigger a click event to open the native picker
+                const event = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true
+                });
+                input.dispatchEvent(event);
+            }
+        } catch (error) {
+            // Final fallback: just focus
+            input.focus();
+        }
+    }
+    
+    // Handle planting date input
+    if (plantingInput) {
+        plantingInput.addEventListener('click', function(e) {
+            e.stopPropagation();
+            openDatePicker(this);
+        });
+        
+        // Update harvest date min when planting date changes
+        plantingInput.addEventListener('change', function() {
+            if (harvestInput && this.value) {
+                harvestInput.min = this.value;
+                // If harvest date is before new min, clear it
+                if (harvestInput.value && harvestInput.value < this.value) {
+                    harvestInput.value = '';
+                }
             }
         });
-
-        // Make label click toggle checkbox in case label click is intercepted
-        var cb = document.getElementById('use_weather_api_cb');
-        if (cb) {
-            var parentLabel = cb.closest('label');
-            if (parentLabel) {
-                parentLabel.addEventListener('click', function (e) {
-                    // If click didn't land on the checkbox itself, toggle it
-                    if (e.target !== cb) {
-                        cb.checked = !cb.checked;
-                        cb.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                });
-            }
-        }
-    } catch (err) {
-        // silent fallback
-        console.error('Forecast input helper error', err);
+    }
+    
+    // Handle harvest date input
+    if (harvestInput) {
+        harvestInput.addEventListener('click', function(e) {
+            e.stopPropagation();
+            openDatePicker(this);
+        });
     }
 });
 </script>
 @endsection
-
-

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Record;
 use App\Services\WeatherService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Estimates agricultural features (rainfall, temperature, etc.)
@@ -61,7 +62,12 @@ class FeatureEstimator
 		}
 		
 		// Priority 1: Try location-specific averages
-		$locationAverages = $this->getLocationSeasonAverages(self::FOCUS_LOCATION, $season);
+		// Try both 'Palo' and 'Palo, Leyte' for better matching
+		$locationAverages = $this->getLocationSeasonAverages(self::FOCUS_LOCATION_DISPLAY, $season);
+		if (!$locationAverages) {
+			// Fallback to just 'Palo' if full name doesn't match
+			$locationAverages = $this->getLocationSeasonAverages(self::FOCUS_LOCATION, $season);
+		}
 		if ($locationAverages) {
 			$result = array_merge($locationAverages, [
 				'hasLocationData' => true,
@@ -173,112 +179,137 @@ class FeatureEstimator
 	/**
 	 * Get averages for a specific location and season
 	 * Uses case-insensitive matching for better location detection
+	 * Optimized with caching and improved matching logic
 	 */
 	private function getLocationSeasonAverages(string $location, string $season): ?array
 	{
-		$locationLower = strtolower($location);
-
-		$records = Record::where('season', $season)
-			->whereNotNull('rainfall_mm')
-			->whereNotNull('temperature_c')
-			->whereNotNull('soil_ph')
-			->whereNotNull('fertilizer_kg')
-			->whereNotNull('area_ha')
-			->where(function ($query) use ($location, $locationLower) {
-				$query->whereRaw('LOWER(location) = LOWER(?)', [$location])
-					->orWhereRaw('LOWER(location) LIKE ?', ["%{$locationLower}%"]);
-			})
-			->get();
-
-		if ($records->isEmpty()) {
-			return null;
-		}
-
-		$count = $records->count();
+		// Cache key for location-season averages
+		$cacheKey = "location_avg_{$location}_{$season}_" . md5($location . $season);
 		
-		return [
-			'rainfall_mm' => $records->avg('rainfall_mm') ?? 0,
-			'temperature_c' => $records->avg('temperature_c') ?? 0,
-			'soil_ph' => $records->avg('soil_ph') ?? 0,
-			'fertilizer_kg' => $records->avg('fertilizer_kg') ?? 0,
-			'area_ha' => $records->avg('area_ha') ?? 0,
-		];
+		return Cache::remember($cacheKey, 1800, function () use ($location, $season) {
+			$locationLower = strtolower(trim($location));
+			
+			// Improved matching: try exact match, then partial match, then word boundary match
+			$records = Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha'])
+				->where('season', $season)
+				->whereNotNull('rainfall_mm')
+				->whereNotNull('temperature_c')
+				->whereNotNull('soil_ph')
+				->whereNotNull('fertilizer_kg')
+				->whereNotNull('area_ha')
+				->where(function ($query) use ($location, $locationLower) {
+					// Exact match (case-insensitive)
+					$query->whereRaw('LOWER(TRIM(location)) = ?', [$locationLower])
+						// Partial match - location contains the search term
+						->orWhereRaw('LOWER(location) LIKE ?', ["%{$locationLower}%"])
+						// Word boundary match - handles "Palo" matching "Palo, Leyte"
+						->orWhereRaw('LOWER(location) LIKE ?', ["{$locationLower},%"])
+						->orWhereRaw('LOWER(location) LIKE ?', ["%, {$locationLower}%"]);
+				})
+				->get();
+
+			if ($records->isEmpty()) {
+				return null;
+			}
+			
+			return [
+				'rainfall_mm' => $records->avg('rainfall_mm') ?? 0,
+				'temperature_c' => $records->avg('temperature_c') ?? 0,
+				'soil_ph' => $records->avg('soil_ph') ?? 0,
+				'fertilizer_kg' => $records->avg('fertilizer_kg') ?? 0,
+				'area_ha' => $records->avg('area_ha') ?? 0,
+			];
+		});
 	}
 
 	/**
 	 * Get regional averages for a specific region and season
 	 * Uses geographic knowledge to find locations in the same region
+	 * Optimized with caching
 	 */
 	private function getRegionSeasonAverages(string $region, string $season): ?array
 	{
-		// Get all provinces in this region
-		$provinces = $this->geography->getProvincesInRegion($region);
+		// Cache key for region-season averages
+		$cacheKey = "region_avg_{$region}_{$season}_" . md5($region . $season);
 		
-		if (empty($provinces)) {
-			return null;
-		}
-		
-		// Find records from locations in this region
-		$records = Record::where('season', $season)
-			->whereNotNull('rainfall_mm')
-			->whereNotNull('temperature_c')
-			->whereNotNull('soil_ph')
-			->whereNotNull('fertilizer_kg')
-			->whereNotNull('area_ha')
-			->where(function ($query) use ($provinces, $region) {
-				// Match by province names
-				foreach ($provinces as $province) {
-					$query->orWhereRaw('LOWER(location) LIKE LOWER(?)', ["%{$province}%"]);
-				}
-				// Also match by region name
-				$query->orWhereRaw('LOWER(location) LIKE LOWER(?)', ["%{$region}%"]);
-			})
-			->get();
+		return Cache::remember($cacheKey, 1800, function () use ($region, $season) {
+			// Get all provinces in this region
+			$provinces = $this->geography->getProvincesInRegion($region);
+			
+			if (empty($provinces)) {
+				return null;
+			}
+			
+			// Find records from locations in this region
+			$records = Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha'])
+				->where('season', $season)
+				->whereNotNull('rainfall_mm')
+				->whereNotNull('temperature_c')
+				->whereNotNull('soil_ph')
+				->whereNotNull('fertilizer_kg')
+				->whereNotNull('area_ha')
+				->where(function ($query) use ($provinces, $region) {
+					// Match by province names
+					foreach ($provinces as $province) {
+						$query->orWhereRaw('LOWER(location) LIKE LOWER(?)', ["%{$province}%"]);
+					}
+					// Also match by region name
+					$query->orWhereRaw('LOWER(location) LIKE LOWER(?)', ["%{$region}%"]);
+				})
+				->get();
 
-		if ($records->isEmpty()) {
-			return null;
-		}
+			if ($records->isEmpty()) {
+				return null;
+			}
 
-		return [
-			'rainfall_mm' => $records->avg('rainfall_mm') ?? 0,
-			'temperature_c' => $records->avg('temperature_c') ?? 0,
-			'soil_ph' => $records->avg('soil_ph') ?? 0,
-			'fertilizer_kg' => $records->avg('fertilizer_kg') ?? 0,
-			'area_ha' => $records->avg('area_ha') ?? 0,
-		];
+			return [
+				'rainfall_mm' => $records->avg('rainfall_mm') ?? 0,
+				'temperature_c' => $records->avg('temperature_c') ?? 0,
+				'soil_ph' => $records->avg('soil_ph') ?? 0,
+				'fertilizer_kg' => $records->avg('fertilizer_kg') ?? 0,
+				'area_ha' => $records->avg('area_ha') ?? 0,
+			];
+		});
 	}
 
 	/**
 	 * Get overall averages for a season (across all locations)
+	 * Optimized with caching
 	 */
 	private function getSeasonAverages(string $season): array
 	{
-		$records = Record::where('season', $season)
-			->whereNotNull('rainfall_mm')
-			->whereNotNull('temperature_c')
-			->whereNotNull('soil_ph')
-			->whereNotNull('fertilizer_kg')
-			->whereNotNull('area_ha')
-			->get();
+		// Cache key for season averages
+		$cacheKey = "season_avg_{$season}";
+		
+		return Cache::remember($cacheKey, 1800, function () use ($season) {
+			$records = Record::select(['rainfall_mm', 'temperature_c', 'soil_ph', 'fertilizer_kg', 'area_ha'])
+				->where('season', $season)
+				->whereNotNull('rainfall_mm')
+				->whereNotNull('temperature_c')
+				->whereNotNull('soil_ph')
+				->whereNotNull('fertilizer_kg')
+				->whereNotNull('area_ha')
+				->get();
 
-		if ($records->isEmpty()) {
-			// Default values if no data exists
+			if ($records->isEmpty()) {
+				// Default values if no data exists
+				return [
+					'rainfall_mm' => $season === 'Wet' ? 350.0 : 120.0,
+					'temperature_c' => $season === 'Wet' ? 26.5 : 28.8,
+					'soil_ph' => 6.2,
+					'fertilizer_kg' => 175.0,
+					'area_ha' => 1.8,
+				];
+			}
+
 			return [
-				'rainfall_mm' => $season === 'Wet' ? 350.0 : 120.0,
-				'temperature_c' => $season === 'Wet' ? 26.5 : 28.8,
-				'soil_ph' => 6.2,
-				'fertilizer_kg' => 175.0,
-				'area_ha' => 1.8,
+				'rainfall_mm' => $records->avg('rainfall_mm') ?? 0,
+				'temperature_c' => $records->avg('temperature_c') ?? 0,
+				'soil_ph' => $records->avg('soil_ph') ?? 0,
+				'fertilizer_kg' => $records->avg('fertilizer_kg') ?? 0,
+				'area_ha' => $records->avg('area_ha') ?? 0,
 			];
-		}
-
-		return [
-			'rainfall_mm' => $records->avg('rainfall_mm') ?? 0,
-			'temperature_c' => $records->avg('temperature_c') ?? 0,
-			'soil_ph' => $records->avg('soil_ph') ?? 0,
-			'fertilizer_kg' => $records->avg('fertilizer_kg') ?? 0,
-			'area_ha' => $records->avg('area_ha') ?? 0,
-		];
+		});
 	}
 
 }

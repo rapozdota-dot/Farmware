@@ -82,9 +82,12 @@ class NeuralNetwork
 
 		$n = count($normFeatures);
 		
-		// Training loop
+		// Training loop with learning rate decay for better convergence
 		for ($epoch = 0; $epoch < $maxEpochs; $epoch++) {
 			$totalError = 0.0;
+			
+			// Learning rate decay: reduce learning rate gradually for better convergence
+			$currentLr = $lr * (1.0 / (1.0 + 0.001 * $epoch));
 			
 			// Deterministic shuffle based on epoch and seed
 			$indices = range(0, $n - 1);
@@ -102,8 +105,8 @@ class NeuralNetwork
 				$error = $output - $y;
 				$totalError += $error * $error;
 				
-				// Backward pass (backpropagation)
-				$this->backward($activations, $x, $error, $lr);
+				// Backward pass (backpropagation) with decayed learning rate
+				$this->backward($activations, $x, $error, $currentLr);
 			}
 			
 			// Early stopping if error is very small
